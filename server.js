@@ -6,110 +6,107 @@ app.use(express.json());
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
-// 1) Health-check, чтобы проверять в браузере
-app.get("/health", (req, res) => {
-  res.status(200).send("ok");
-});
-
-// 2) GET /webhook — чтобы в браузере не было "ошибка"
-app.get("/webhook", (req, res) => {
-  res.status(200).send("webhook is alive (use POST)");
-});
-
 async function sendMessage(user_id, text, buttons = null) {
-  let body = { text };
+  const body = {
+    user_id,
+    text
+  };
 
   if (buttons) {
-    body.attachments = [
-      {
-        type: "inline_keyboard",
-        payload: { buttons },
-      },
-    ];
+    body.attachments = [{
+      type: "inline_keyboard",
+      buttons
+    }];
   }
 
-  const r = await fetch("https://platform-api.max.ru/messages?user_id=" + user_id, {
+  await fetch("https://platform-api.max.ru/messages", {
     method: "POST",
     headers: {
-      Authorization: BOT_TOKEN,
-      "Content-Type": "application/json",
+      "Authorization": BOT_TOKEN,
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body)
   });
-
-  const t = await r.text();
-  console.log("sendMessage status:", r.status, "resp:", t);
 }
 
-app.post("/webhook", async (req, res) => {
-  console.log("=== INCOMING UPDATE ===");
-  console.log(JSON.stringify(req.body, null, 2));
+/* ---------------- HEALTH ---------------- */
 
+app.get("/health", (req, res) => {
+  res.send("OK");
+});
+
+/* ---------------- WEBHOOK ---------------- */
+
+app.post("/webhook", async (req, res) => {
   const update = req.body;
 
-  // ВАЖНО: сразу отвечаем 200 OK, чтобы MAX не ретраил
-  res.status(200).send("ok");
-
   try {
-    // Вариант 1: если MAX шлёт message
-    if (update.message) {
-      const user = update.message.sender?.user_id;
-      const text = update.message.body?.text;
 
-      if (!user) return;
+    /* === BOT START === */
 
-      if (text === "/start") {
-        await sendMessage(
-          user,
-          "Добро пожаловать в CODEPARTS 🚗\nВыберите действие:",
-          [[{ type: "callback", text: "Подобрать по VIN", payload: "vin" }]]
-        );
-        return;
-      }
+    if (update.update_type === "bot_started" || update.bot_started) {
 
-      // если похоже на VIN (17 символов)
-      if (text && text.length === 17) {
-        await sendMessage(user, "Введите список нужных запчастей");
-        return;
-      }
-    }
-
-    // Вариант 2: если MAX шлёт callback
-    if (update.callback) {
-      const user = update.callback.user?.user_id;
-      const payload = update.callback.payload;
-
-      if (!user) return;
-
-      if (payload === "vin") {
-        await sendMessage(user, "Введите VIN автомобиля");
-        return;
-      }
-    }
-
-    // Вариант 3: если MAX шлёт bot_started (некоторые платформы так делают)
-    if (update.type === "bot_started" || update.bot_started) {
       const user =
         update.user?.user_id ||
         update.bot_started?.user?.user_id ||
         update.sender?.user_id;
 
-      if (!user) return;
+      if (!user) return res.sendStatus(200);
 
       await sendMessage(
         user,
         "Добро пожаловать в CODEPARTS 🚗\nВыберите действие:",
         [[{ type: "callback", text: "Подобрать по VIN", payload: "vin" }]]
       );
-      return;
+
+      return res.sendStatus(200);
     }
+
+    /* === BUTTON CLICK === */
+
+    if (update.update_type === "message_callback") {
+
+      const user = update.user?.user_id || update.sender?.user_id;
+      const payload = update.payload;
+
+      if (payload === "vin") {
+        await sendMessage(user,
+          "Введите:\n\nVIN\nМарку\nМодель\nГод\nОбъём двигателя"
+        );
+      }
+
+      return res.sendStatus(200);
+    }
+
+    /* === VIN INPUT === */
+
+    if (update.update_type === "message_created") {
+
+      const user = update.user?.user_id || update.sender?.user_id;
+      const text = update.message?.text;
+
+      if (!user || !text) return res.sendStatus(200);
+
+      if (text.length >= 17) {
+        await sendMessage(user,
+          "Спасибо 👍\nМенеджер уже подбирает запчасти.\n\nОжидайте варианты:\n• Оригинал\n• Оптимальный\n• Бюджет"
+        );
+      }
+
+      return res.sendStatus(200);
+    }
+
   } catch (e) {
-    console.error("handler error:", e);
+    console.error("Webhook error:", e);
   }
+
+  res.sendStatus(200);
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log("Server started on port", port));
-app.get("/health", (req, res) => {
-  res.send("OK");
+/* ---------------- START ---------------- */
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Server running on port", PORT);
 });

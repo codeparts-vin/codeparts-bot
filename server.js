@@ -110,3 +110,6 @@ app.post("/webhook", async (req, res) => {
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log("Server started on port", port));
+app.get("/health", (req, res) => {
+  res.send("OK");
+});
